@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -29,6 +31,10 @@ func main() {
 			&cli.StringFlag{Name: "listen-address", Value: ":8080", Usage: "the address to listen for incoming API connections"},
 			&cli.StringFlag{Name: "listen-tls-key", Value: "", Usage: "path to a file with a TLS cert for the server (enables TLS support)"},
 			&cli.StringFlag{Name: "listen-tls-password", Value: "", Usage: "path to the TLS key for the server (enables TLS support)"},
+			// Options for metrics generation
+			&cli.StringFlag{Name: "metrics-endpoint", Value: "/metrics", Usage: "endpoint for serving metrics requests"},
+			&cli.UintFlag{Name: "metrics-min-count", Value: 0, Usage: "minimum number of metrics to return in responses"},
+			&cli.UintFlag{Name: "metrics-max-count", Value: 10, Usage: "maximum number of metrics to return in responses"},
 		},
 		Action: demowareApp,
 	}
@@ -42,6 +48,7 @@ func main() {
 func demowareApp(cliCtx *cli.Context) error {
 	ctx := signalAwareContext(context.Background())
 	mux := http.NewServeMux()
+	registerMetricsHandler(cliCtx, mux)
 
 	srv, err := startServer(cliCtx, mux)
 	if err != nil {
@@ -122,4 +129,71 @@ func signalAwareContext(ctx context.Context) context.Context {
 func exitWithError(err error) {
 	appLogger.WithError(err).Errorf("terminating due to error")
 	os.Exit(1)
+}
+
+type metricsEnvelope struct {
+	Type    string      `json:"type"`
+	Payload interface{} `json:"payload"`
+}
+
+type loadAvgMetric struct {
+	Value float32 `json:"value"`
+}
+
+type cpuUsageMetric struct {
+	Value []float32 `json:"value"`
+}
+
+type lastKernelUpgrade struct {
+	Value time.Time `json:"value"`
+}
+
+// registerMetricsHandler generates a handler for the metrics endpoint that is
+// parametrized by the contents of the provided CLI context and registers it
+// to the provided ServeMux.
+func registerMetricsHandler(cliCtx *cli.Context, mux *http.ServeMux) {
+	endpoint := cliCtx.String("metrics-endpoint")
+	minMetrics := int32(cliCtx.Uint("metrics-min-count"))
+	maxMetrics := int32(cliCtx.Uint("metrics-max-count"))
+	if minMetrics > maxMetrics {
+		exitWithError(xerrors.Errorf("invalid metrics count params: min-count > max-count"))
+	}
+
+	appLogger.WithField("endpoint", endpoint).Info("registered metrics handler")
+
+	mux.Handle(endpoint, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		numMetrics := rand.Int31n(maxMetrics-minMetrics) + minMetrics
+		metricsList := make([]metricsEnvelope, numMetrics)
+		for i := int32(0); i < numMetrics; i++ {
+			switch rand.Int31n(3) {
+			case 0:
+				metricsList[i].Type = "load_avg"
+				metricsList[i].Payload = loadAvgMetric{
+					Value: rand.Float32(),
+				}
+			case 1:
+				metricsList[i].Type = "cpu_usage"
+				values := make([]float32, 5)
+				for i := 0; i < len(values); i++ {
+					values[i] = rand.Float32()
+				}
+				metricsList[i].Payload = cpuUsageMetric{
+					Value: values,
+				}
+			case 2:
+				metricsList[i].Type = "last_kernel_upgrade"
+				metricsList[i].Payload = lastKernelUpgrade{
+					Value: time.Now(),
+				}
+			}
+		}
+
+		// Serialize response
+		if err := json.NewEncoder(w).Encode(metricsList); err != nil {
+			appLogger.WithError(err).Error("GET /metrics")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		appLogger.WithField("num_metrics", numMetrics).Info("GET /metrics")
+	}))
 }
