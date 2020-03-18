@@ -37,7 +37,8 @@ func main() {
 			&cli.UintFlag{Name: "metrics-min-count", Value: 0, Usage: "minimum number of metrics to return in responses"},
 			&cli.UintFlag{Name: "metrics-max-count", Value: 10, Usage: "maximum number of metrics to return in responses"},
 			// Injectable options
-			&cli.StringFlag{Name: "with-auth-token", Value: "", Usage: "require clients to provide basic auth token"},
+			&cli.StringFlag{Name: "with-auth-token", Value: "", Usage: "if specified, require clients to provide basic auth token"},
+			&cli.Float64Flag{Name: "with-random-error-prob", Value: 0, Usage: "if non-zero, inject errors based on the given probability"},
 		},
 		Action: demowareApp,
 	}
@@ -162,6 +163,10 @@ func registerMetricsHandler(cliCtx *cli.Context, mux *http.ServeMux) {
 		h = injectAuthMiddleware(h, token)
 		appLogger.WithField("auth_token", token).Info("enabling authentication for incoming requests")
 	}
+	if failProb := cliCtx.Float64("with-random-error-prob"); failProb != 0 {
+		h = injectRandomErrorMiddleware(h, failProb)
+		appLogger.WithField("fail_prob", failProb).Info("enabling random fail injector for incoming requests")
+	}
 
 	mux.Handle(endpoint, h)
 	appLogger.WithField("endpoint", endpoint).Info("registered metrics handler")
@@ -222,6 +227,23 @@ func injectAuthMiddleware(h http.Handler, token string) http.Handler {
 		if !ok || user != token {
 			w.WriteHeader(http.StatusUnauthorized)
 			appLogger.WithError(xerrors.Errorf("authentication failed")).Error("GET ", r.URL.Path)
+			return
+		}
+
+		h.ServeHTTP(w, r)
+	})
+}
+
+// injectRandomErrorMiddleware wraps h with a middleware that injects errors
+// with the specified probability.
+func injectRandomErrorMiddleware(h http.Handler, prob float64) http.Handler {
+	if prob < 0 || prob > 1 {
+		exitWithError(xerrors.Errorf("random error probability must be in the (0, 1] range"))
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if rand.Float64() <= prob {
+			w.WriteHeader(http.StatusInternalServerError)
+			appLogger.WithError(xerrors.Errorf("injected error")).Error("GET ", r.URL.Path)
 			return
 		}
 
