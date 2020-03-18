@@ -6,6 +6,9 @@ run:
 		-with-auth-token=deadbeef \
 		-with-random-error-prob=0.1
 
+build:
+	go build -o demoware
+
 lint: lint-check-deps
 	@echo "[golangci-lint] linting sources"
 	@golangci-lint run \
