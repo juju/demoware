@@ -23,6 +23,7 @@ var (
 )
 
 func main() {
+	rand.Seed(time.Now().UnixNano())
 	rootLogger.SetOutput(os.Stderr)
 	app := &cli.App{
 		Name:  "demoware",
@@ -35,6 +36,8 @@ func main() {
 			&cli.StringFlag{Name: "metrics-endpoint", Value: "/metrics", Usage: "endpoint for serving metrics requests"},
 			&cli.UintFlag{Name: "metrics-min-count", Value: 0, Usage: "minimum number of metrics to return in responses"},
 			&cli.UintFlag{Name: "metrics-max-count", Value: 10, Usage: "maximum number of metrics to return in responses"},
+			// Injectable options
+			&cli.StringFlag{Name: "with-auth-token", Value: "", Usage: "require clients to provide basic auth token"},
 		},
 		Action: demowareApp,
 	}
@@ -148,20 +151,32 @@ type lastKernelUpgrade struct {
 	Value time.Time `json:"value"`
 }
 
-// registerMetricsHandler generates a handler for the metrics endpoint that is
-// parametrized by the contents of the provided CLI context and registers it
-// to the provided ServeMux.
+// registerMetricsHandler registers a handler for the metrics endpoint with
+// the provided ServeMux.
 func registerMetricsHandler(cliCtx *cli.Context, mux *http.ServeMux) {
 	endpoint := cliCtx.String("metrics-endpoint")
+	h := genMetricsHandler(cliCtx)
+
+	// Wrap base handler with additional middleware
+	if token := cliCtx.String("with-auth-token"); token != "" {
+		h = injectAuthMiddleware(h, token)
+		appLogger.WithField("auth_token", token).Info("enabling authentication for incoming requests")
+	}
+
+	mux.Handle(endpoint, h)
+	appLogger.WithField("endpoint", endpoint).Info("registered metrics handler")
+}
+
+// registerMetricsHandler generates a handler for the metrics endpoint that is
+// parametrized by the contents of the provided CLI context.
+func genMetricsHandler(cliCtx *cli.Context) http.Handler {
 	minMetrics := int32(cliCtx.Uint("metrics-min-count"))
 	maxMetrics := int32(cliCtx.Uint("metrics-max-count"))
 	if minMetrics > maxMetrics {
 		exitWithError(xerrors.Errorf("invalid metrics count params: min-count > max-count"))
 	}
 
-	appLogger.WithField("endpoint", endpoint).Info("registered metrics handler")
-
-	mux.Handle(endpoint, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		numMetrics := rand.Int31n(maxMetrics-minMetrics) + minMetrics
 		metricsList := make([]metricsEnvelope, numMetrics)
 		for i := int32(0); i < numMetrics; i++ {
@@ -190,10 +205,26 @@ func registerMetricsHandler(cliCtx *cli.Context, mux *http.ServeMux) {
 
 		// Serialize response
 		if err := json.NewEncoder(w).Encode(metricsList); err != nil {
-			appLogger.WithError(err).Error("GET /metrics")
+			appLogger.WithError(err).Error("GET ", r.URL.Path)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		appLogger.WithField("num_metrics", numMetrics).Info("GET /metrics")
-	}))
+		appLogger.WithField("num_metrics", numMetrics).Info("GET ", r.URL.Path)
+	})
+}
+
+// injectAuthMiddleware wraps h with a middleware that performs basic auth
+// checks for incoming requests by matching the client-provided username
+// with the specified token.
+func injectAuthMiddleware(h http.Handler, token string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, _, ok := r.BasicAuth()
+		if !ok || user != token {
+			w.WriteHeader(http.StatusUnauthorized)
+			appLogger.WithError(xerrors.Errorf("authentication failed")).Error("GET ", r.URL.Path)
+			return
+		}
+
+		h.ServeHTTP(w, r)
+	})
 }
