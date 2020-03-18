@@ -2,7 +2,9 @@
 
 run: 
 	@echo "[demoware] running with default params"
-	go run main.go
+	@go run main.go \
+		-with-auth-token=deadbeef \
+		-with-random-error-prob=0.1
 
 lint: lint-check-deps
 	@echo "[golangci-lint] linting sources"
