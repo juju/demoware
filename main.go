@@ -30,8 +30,8 @@ func main() {
 		Usage: "A minimal test server that simulates a poll-able metrics stream",
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "listen-address", Value: ":8080", Usage: "the address to listen for incoming API connections"},
-			&cli.StringFlag{Name: "listen-tls-key", Value: "", Usage: "path to a file with a TLS cert for the server (enables TLS support)"},
-			&cli.StringFlag{Name: "listen-tls-password", Value: "", Usage: "path to the TLS key for the server (enables TLS support)"},
+			&cli.StringFlag{Name: "listen-tls-cert", Value: "", Usage: "path to a file with a TLS cert for the server (enables TLS support)"},
+			&cli.StringFlag{Name: "listen-tls-key", Value: "", Usage: "path to the TLS key for the server (enables TLS support)"},
 			// Options for metrics generation
 			&cli.StringFlag{Name: "metrics-endpoint", Value: "/metrics", Usage: "endpoint for serving metrics requests"},
 			&cli.UintFlag{Name: "metrics-min-count", Value: 0, Usage: "minimum number of metrics to return in responses"},
@@ -74,8 +74,8 @@ func demowareApp(cliCtx *cli.Context) error {
 func startServer(cliCtx *cli.Context, mux http.Handler) (*http.Server, error) {
 	var (
 		listenAt    = cliCtx.String("listen-address")
-		tlsCertFile = cliCtx.String("listen-tls-key")
-		tlsKeyFile  = cliCtx.String("listen-tlk-password")
+		tlsCertFile = cliCtx.String("listen-tls-cert")
+		tlsKeyFile  = cliCtx.String("listen-tls-key")
 		srv         = &http.Server{Handler: mux}
 	)
 

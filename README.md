@@ -37,8 +37,8 @@ COMMANDS:
 
 GLOBAL OPTIONS:
    --listen-address value          the address to listen for incoming API connections (default: ":8080")
-   --listen-tls-key value          path to a file with a TLS cert for the server (enables TLS support)
-   --listen-tls-password value     path to the TLS key for the server (enables TLS support)
+   --listen-tls-cert value         path to a file with a TLS cert for the server (enables TLS support)
+   --listen-tls-key value          path to the TLS key for the server (enables TLS support)
    --metrics-endpoint value        endpoint for serving metrics requests (default: "/metrics")
    --metrics-min-count value       minimum number of metrics to return in responses (default: 0)
    --metrics-max-count value       maximum number of metrics to return in responses (default: 10)
